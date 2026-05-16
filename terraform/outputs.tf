@@ -25,3 +25,14 @@ output "us_east_1_ecr_url" {
   value       = module.region_us_east_1.ecr_repository_url
 }
 
+# Global Accelerator outputs
+output "global_accelerator_dns" {
+  description = "Global Accelerator DNS name — this is your single entry point"
+  value       = aws_globalaccelerator_accelerator.this.dns_name
+}
+
+output "global_accelerator_ips" {
+  description = "Global Accelerator static anycast IPs"
+  value       = aws_globalaccelerator_accelerator.this.ip_sets.ip_addresses
+}
+

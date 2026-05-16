@@ -14,3 +14,5 @@ regions = [
   }
 ]
 
+nlb_arns = {}
+
