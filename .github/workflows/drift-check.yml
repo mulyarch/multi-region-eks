@@ -2,8 +2,8 @@ name: Drift Detection
 
 on:
   schedule:
-    - cron: '0 8 * * *'  # Every day at 8am UTC
-  workflow_dispatch:       # Manual trigger
+    - cron: '0 8 * * *'
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -25,22 +25,55 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION_PRIMARY }}
 
+      - name: Get NLB ARNs
+        id: get-nlbs
+        run: |
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-west-2 --region us-west-2
+          WEST_LB_HOST=$(kubectl get svc apache-hello-svc -n apache-app \
+            -o go-template='{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}')
+          WEST_NLB_ARN=$(aws elbv2 describe-load-balancers --region us-west-2 \
+            --query "LoadBalancers[?DNSName=='$WEST_LB_HOST'].LoadBalancerArn" --output text)
+          echo "west_nlb_arn=$WEST_NLB_ARN" >> $GITHUB_OUTPUT
+
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-east-1 --region us-east-1
+          EAST_LB_HOST=$(kubectl get svc apache-hello-svc -n apache-app \
+            -o go-template='{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}')
+          EAST_NLB_ARN=$(aws elbv2 describe-load-balancers --region us-east-1 \
+            --query "LoadBalancers[?DNSName=='$EAST_LB_HOST'].LoadBalancerArn" --output text)
+          echo "east_nlb_arn=$EAST_NLB_ARN" >> $GITHUB_OUTPUT
+
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-eu-west-1 --region eu-west-1
+          EU_LB_HOST=$(kubectl get svc apache-hello-svc -n apache-app \
+            -o go-template='{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}')
+          EU_NLB_ARN=$(aws elbv2 describe-load-balancers --region eu-west-1 \
+            --query "LoadBalancers[?DNSName=='$EU_LB_HOST'].LoadBalancerArn" --output text)
+          echo "eu_nlb_arn=$EU_NLB_ARN" >> $GITHUB_OUTPUT
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.15.2"
 
-      - name: Check for drift
+      - name: Check and fix drift
+        env:
+          WEST_NLB_ARN: ${{ steps.get-nlbs.outputs.west_nlb_arn }}
+          EAST_NLB_ARN: ${{ steps.get-nlbs.outputs.east_nlb_arn }}
+          EU_NLB_ARN: ${{ steps.get-nlbs.outputs.eu_nlb_arn }}
         run: |
           cd terraform
           terraform init
-          PLAN_OUTPUT=$(terraform plan -var-file=environments/prod.tfvars -detailed-exitcode 2>&1) || EXIT_CODE=$?
+          PLAN_OUTPUT=$(terraform plan -detailed-exitcode \
+            -var-file=environments/prod.tfvars \
+            -var='nlb_arns={"us-west-2":"'"$WEST_NLB_ARN"'","us-east-1":"'"$EAST_NLB_ARN"'","eu-west-1":"'"$EU_NLB_ARN"'"}' \
+            2>&1) || EXIT_CODE=$?
 
           if [ "$EXIT_CODE" == "2" ]; then
-            echo "⚠️ DRIFT DETECTED!"
+            echo "⚠️ DRIFT DETECTED! Fixing..."
             echo "$PLAN_OUTPUT"
-            exit 1
+            terraform apply -auto-approve \
+              -var-file=environments/prod.tfvars \
+              -var='nlb_arns={"us-west-2":"'"$WEST_NLB_ARN"'","us-east-1":"'"$EAST_NLB_ARN"'","eu-west-1":"'"$EU_NLB_ARN"'"}'
+            echo "✅ Drift fixed — infrastructure restored to match code"
           else
             echo "✅ No drift — infrastructure matches code"
           fi
-
