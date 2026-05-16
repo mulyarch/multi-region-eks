@@ -1,0 +1,11 @@
+# ==============================================================================
+# REGION: us-west-2 (default provider)
+# ==============================================================================
+
+module "region_us_west_2" {
+  source = "./modules/region-stack"
+
+  project_name       = var.project_name
+  region             = "us-west-2"
+  azs                = ["us-west-2a", "us-west-2b", "us-west-2c"]
+  vpc_cidr        
