@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (us-west-2)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
@@ -226,7 +226,6 @@ jobs:
       - name: Get NLB ARNs
         id: get-nlbs
         run: |
-          # Get us-west-2 NLB ARN
           aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-west-2 --region us-west-2
           WEST_LB_HOST=$(kubectl get svc apache-hello-svc -n apache-app \
             -o go-template='{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}')
@@ -234,7 +233,6 @@ jobs:
             --query "LoadBalancers[?DNSName=='$WEST_LB_HOST'].LoadBalancerArn" --output text)
           echo "west_nlb_arn=$WEST_NLB_ARN" >> $GITHUB_OUTPUT
 
-          # Get us-east-1 NLB ARN
           aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-east-1 --region us-east-1
           EAST_LB_HOST=$(kubectl get svc apache-hello-svc -n apache-app \
             -o go-template='{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}')
@@ -265,4 +263,3 @@ jobs:
           terraform output global_accelerator_dns
           echo "=== STATIC IPs ==="
           terraform output global_accelerator_ips
-
