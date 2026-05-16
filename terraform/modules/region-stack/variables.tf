@@ -45,3 +45,8 @@ variable "node_desired_size" {
   default = 2
 }
 
+variable "github_actions_role_arn" {
+  description = "IAM Role ARN for GitHub Actions to access EKS"
+  type        = string
+}
+

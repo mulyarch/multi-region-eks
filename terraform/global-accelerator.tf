@@ -65,3 +65,20 @@ resource "aws_globalaccelerator_endpoint_group" "us_east_1" {
   }
 }
 
+resource "aws_globalaccelerator_endpoint_group" "eu_west_1" {
+  count = lookup(var.nlb_arns, "eu-west-1", "") != "" ? 1 : 0
+
+  listener_arn                  = aws_globalaccelerator_listener.http.id
+  endpoint_group_region         = "eu-west-1"
+  health_check_port             = 80
+  health_check_protocol         = "TCP"
+  health_check_interval_seconds = 10
+  threshold_count               = 2
+
+  endpoint_configuration {
+    endpoint_id                    = var.nlb_arns["eu-west-1"]
+    weight                         = 100
+    client_ip_preservation_enabled = false
+  }
+}
+

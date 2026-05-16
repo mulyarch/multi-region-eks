@@ -26,6 +26,15 @@ output "us_east_1_ecr_url" {
   value       = module.region_us_east_1.ecr_repository_url
 }
 
+output "eu_west_1_cluster_name" {
+  value = module.region_eu_west_1.cluster_name
+}
+
+output "eu_west_1_ecr_url" {
+  value = module.region_eu_west_1.ecr_repository_url
+}
+
+
 # Global Accelerator outputs
 output "global_accelerator_dns" {
   description = "Global Accelerator DNS name — this is your single entry point"

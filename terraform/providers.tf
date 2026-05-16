@@ -19,3 +19,8 @@ provider "aws" {
   region = "us-east-1"
 }
 
+# Third region provider
+provider "aws" {
+  alias  = "eu_west_1"
+  region = "eu-west-1"
+}
