@@ -1,3 +1,4 @@
+
 output "github_actions_role_arn" {
   description = "IAM Role ARN for GitHub Actions"
   value       = aws_iam_role.github_actions.arn
@@ -33,6 +34,7 @@ output "global_accelerator_dns" {
 
 output "global_accelerator_ips" {
   description = "Global Accelerator static anycast IPs"
-  value       = aws_globalaccelerator_accelerator.this.ip_sets.ip_addresses
+  value       = aws_globalaccelerator_accelerator.this.ip_sets[0].ip_addresses
 }
+
 
