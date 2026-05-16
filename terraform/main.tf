@@ -50,7 +50,7 @@ module "region_eu_west_1" {
   project_name            = var.project_name
   region                  = "eu-west-1"
   azs                     = ["eu-west-1a", "eu-west-1b", "eu-west-1c"]
-  vpc_cidr                = "[IP_ADDRESS]"
+  vpc_cidr                = "10.2.0.0/16"
   cluster_version         = "1.32"
   node_instance_type      = "t3.medium"
   node_desired_size       = 2
