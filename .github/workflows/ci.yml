@@ -1,0 +1,133 @@
+name: CI Pipeline
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+
+env:
+  AWS_REGION_PRIMARY: us-west-2
+  AWS_REGION_SECONDARY: us-east-1
+  ECR_REPOSITORY: multi-region-eks-app
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: app/Dockerfile
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.2"
+
+      - name: Validate Terraform
+        run: |
+          cd terraform
+          terraform init -backend=false
+          terraform validate
+          terraform fmt -check
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build --build-arg REGION=test -t apache-hello:${{ github.sha }} ./app
+
+      - name: Run smoke tests
+        run: |
+          CONTAINER_ID=$(docker run -d -p 8888:80 apache-hello:${{ github.sha }})
+          sleep 3
+
+          # Test HTTP 200
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8888)
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "FAIL: Expected 200, got $HTTP_CODE"
+            docker stop $CONTAINER_ID && docker rm $CONTAINER_ID
+            exit 1
+          fi
+          echo "PASS: HTTP 200"
+
+          # Test content
+          CONTENT=$(curl -s http://localhost:8888)
+          if ! echo "$CONTENT" | grep -q "Hello World"; then
+            echo "FAIL: Content check"
+            docker stop $CONTAINER_ID && docker rm $CONTAINER_ID
+            exit 1
+          fi
+          echo "PASS: Content check"
+
+          docker stop $CONTAINER_ID && docker rm $CONTAINER_ID
+          echo "All smoke tests passed!"
+
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: apache-hello:${{ github.sha }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+  push-to-ecr:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_PRIMARY }}
+
+      - name: Login to ECR (us-west-2)
+        id: login-ecr-west
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push to us-west-2
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr-west.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build --build-arg REGION=us-west-2 \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./app
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                     $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Login to ECR (us-east-1)
+        id: login-ecr-east
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registries: ${{ steps.login-ecr-west.outputs.registry }}
+        env:
+          AWS_REGION: us-east-1
+
+      - name: Build and push to us-east-1
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr-east.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build --build-arg REGION=us-east-1 \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./app
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                     $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
