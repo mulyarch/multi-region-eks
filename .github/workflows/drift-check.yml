@@ -1,0 +1,46 @@
+name: Drift Detection
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # Every day at 8am UTC
+  workflow_dispatch:       # Manual trigger
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION_PRIMARY: us-west-2
+  CLUSTER_PREFIX: multi-region-eks
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_PRIMARY }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.2"
+
+      - name: Check for drift
+        run: |
+          cd terraform
+          terraform init
+          PLAN_OUTPUT=$(terraform plan -var-file=environments/prod.tfvars -detailed-exitcode 2>&1) || EXIT_CODE=$?
+
+          if [ "$EXIT_CODE" == "2" ]; then
+            echo "⚠️ DRIFT DETECTED!"
+            echo "$PLAN_OUTPUT"
+            exit 1
+          else
+            echo "✅ No drift — infrastructure matches code"
+          fi
+
