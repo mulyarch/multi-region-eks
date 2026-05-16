@@ -46,6 +46,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
     id     = "archive-old-logs"
     status = "Enabled"
 
+    filter {}
+
     transition {
       days          = 90
       storage_class = "GLACIER"
@@ -57,7 +59,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
     }
 
     expiration {
-      days = 2555  # 7 years retention for compliance
+      days = 2555
     }
   }
 }

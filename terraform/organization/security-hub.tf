@@ -5,9 +5,9 @@
 
 resource "aws_securityhub_account" "main" {}
 
-# Enable CIS AWS Foundations Benchmark
+# Enable CIS AWS Foundations Benchmark v3.0.0
 resource "aws_securityhub_standards_subscription" "cis" {
-  standards_arn = "arn:aws:securityhub:::ruleset/cis-aws-foundations-benchmark/v/1.4.0"
+  standards_arn = "arn:aws:securityhub:us-west-2::standards/cis-aws-foundations-benchmark/v/3.0.0"
 
   depends_on = [aws_securityhub_account.main]
 }
@@ -25,4 +25,3 @@ resource "aws_securityhub_standards_subscription" "nist" {
 
   depends_on = [aws_securityhub_account.main]
 }
-
