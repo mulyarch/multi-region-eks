@@ -1,0 +1,218 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION_PRIMARY: us-west-2
+  AWS_REGION_SECONDARY: us-east-1
+  ECR_REPOSITORY: multi-region-eks-app
+  CLUSTER_PREFIX: multi-region-eks
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # --- Job 1: Terraform ---
+  terraform-deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      us_west_2_ecr_url: ${{ steps.tf-output.outputs.us_west_2_ecr_url }}
+      us_east_1_ecr_url: ${{ steps.tf-output.outputs.us_east_1_ecr_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_PRIMARY }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.2"
+
+      - name: Terraform Init & Apply
+        run: |
+          cd terraform
+          terraform init
+          terraform apply -auto-approve \
+            -var-file=environments/prod.tfvars
+
+      - name: Get Terraform outputs
+        id: tf-output
+        run: |
+          cd terraform
+          echo "us_west_2_ecr_url=$(terraform output -raw us_west_2_ecr_url)" >> $GITHUB_OUTPUT
+          echo "us_east_1_ecr_url=$(terraform output -raw us_east_1_ecr_url)" >> $GITHUB_OUTPUT
+
+  # --- Job 2: Build & Push to Both Regions ---
+  build-push:
+    runs-on: ubuntu-latest
+    needs: terraform-deploy
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_PRIMARY }}
+
+      - name: Login to ECR (us-west-2)
+        id: login-ecr-west
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push to us-west-2
+        env:
+          ECR_URL: ${{ needs.terraform-deploy.outputs.us_west_2_ecr_url }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          sed -i "s/__VERSION__/${IMAGE_TAG:0:7}/" app/index.html
+          docker build --build-arg REGION=us-west-2 \
+            -t $ECR_URL:$IMAGE_TAG ./app
+          docker tag $ECR_URL:$IMAGE_TAG $ECR_URL:prod-latest
+          docker push $ECR_URL:$IMAGE_TAG
+          docker push $ECR_URL:prod-latest
+
+      - name: Configure AWS credentials (us-east-1)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_SECONDARY }}
+
+      - name: Login to ECR (us-east-1)
+        id: login-ecr-east
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push to us-east-1
+        env:
+          ECR_URL: ${{ needs.terraform-deploy.outputs.us_east_1_ecr_url }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          sed -i "s/__VERSION__/${IMAGE_TAG:0:7}/" app/index.html
+          docker build --build-arg REGION=us-east-1 \
+            -t $ECR_URL:$IMAGE_TAG ./app
+          docker tag $ECR_URL:$IMAGE_TAG $ECR_URL:prod-latest
+          docker push $ECR_URL:$IMAGE_TAG
+          docker push $ECR_URL:prod-latest
+
+  # --- Job 3: Deploy to us-west-2 ---
+  deploy-us-west-2:
+    runs-on: ubuntu-latest
+    needs: [terraform-deploy, build-push]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_PRIMARY }}
+
+      - name: Setup kubectl
+        run: |
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-west-2 --region us-west-2
+          kubectl get nodes
+
+      - name: Deploy to us-west-2
+        env:
+          ECR_URL: ${{ needs.terraform-deploy.outputs.us_west_2_ecr_url }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          kubectl apply -f k8s/namespace.yml
+          sed "s|IMAGE_PLACEHOLDER|$ECR_URL:$IMAGE_TAG|" k8s/deployment.yml | kubectl apply -f -
+          kubectl apply -f k8s/service.yml
+          kubectl rollout status deployment/apache-hello -n apache-app --timeout=120s
+          kubectl get pods -n apache-app
+
+  # --- Job 4: Deploy to us-east-1 ---
+  deploy-us-east-1:
+    runs-on: ubuntu-latest
+    needs: [terraform-deploy, build-push]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_SECONDARY }}
+
+      - name: Setup kubectl
+        run: |
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-east-1 --region us-east-1
+          kubectl get nodes
+
+      - name: Deploy to us-east-1
+        env:
+          ECR_URL: ${{ needs.terraform-deploy.outputs.us_east_1_ecr_url }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          kubectl apply -f k8s/namespace.yml
+          sed "s|IMAGE_PLACEHOLDER|$ECR_URL:$IMAGE_TAG|" k8s/deployment.yml | kubectl apply -f -
+          kubectl apply -f k8s/service.yml
+          kubectl rollout status deployment/apache-hello -n apache-app --timeout=120s
+          kubectl get pods -n apache-app
+
+  # --- Job 5: Integration Tests ---
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: [deploy-us-west-2, deploy-us-east-1]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_PRIMARY }}
+
+      - name: Test us-west-2
+        run: |
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-west-2 --region us-west-2
+          LB_URL=$(kubectl get svc apache-hello-svc -n apache-app \
+            -o go-template='{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}')
+
+          MAX_RETRIES=30
+          RETRY=0
+          until curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$LB_URL" | grep -q "200"; do
+            RETRY=$((RETRY+1))
+            if [ $RETRY -ge $MAX_RETRIES ]; then
+              echo "FAIL: us-west-2 LB not responding"
+              exit 1
+            fi
+            echo "Waiting for us-west-2 LB... (attempt $RETRY/$MAX_RETRIES)"
+            sleep 10
+          done
+          echo "PASS: us-west-2 responding"
+          curl -s "http://$LB_URL"
+
+      - name: Test us-east-1
+        run: |
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-east-1 --region us-east-1
+          LB_URL=$(kubectl get svc apache-hello-svc -n apache-app \
+            -o go-template='{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}')
+
+          MAX_RETRIES=30
+          RETRY=0
+          until curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$LB_URL" | grep -q "200"; do
+            RETRY=$((RETRY+1))
+            if [ $RETRY -ge $MAX_RETRIES ]; then
+              echo "FAIL: us-east-1 LB not responding"
+              exit 1
+            fi
+            echo "Waiting for us-east-1 LB... (attempt $RETRY/$MAX_RETRIES)"
+            sleep 10
+          done
+          echo "PASS: us-east-1 responding"
+          curl -s "http://$LB_URL"
+
+      - name: Summary
+        run: |
+          echo "=== Multi-Region Deployment Complete ==="
+          echo "Both regions healthy and serving traffic"
+
