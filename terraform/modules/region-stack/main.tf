@@ -48,7 +48,7 @@ module "eks" {
 
   cluster_endpoint_public_access = true
 
-  enable_cluster_creator_admin_permissions = true
+  enable_cluster_creator_admin_permissions = false
 
   access_entries = {
     github_actions = {
