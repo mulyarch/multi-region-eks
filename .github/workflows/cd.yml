@@ -1,17 +1,17 @@
-concurrency:
-  group: cd-pipeline
-  cancel-in-progress: false
-
-
 name: CD Pipeline
 
 on:
   push:
     branches: [main]
 
+concurrency:
+  group: cd-pipeline
+  cancel-in-progress: false
+
 env:
   AWS_REGION_PRIMARY: us-west-2
   AWS_REGION_SECONDARY: us-east-1
+  AWS_REGION_TERTIARY: eu-west-1
   ECR_REPOSITORY: multi-region-eks-app
   CLUSTER_PREFIX: multi-region-eks
 
@@ -25,6 +25,7 @@ jobs:
     outputs:
       us_west_2_ecr_url: ${{ steps.tf-output.outputs.us_west_2_ecr_url }}
       us_east_1_ecr_url: ${{ steps.tf-output.outputs.us_east_1_ecr_url }}
+      eu_west_1_ecr_url: ${{ steps.tf-output.outputs.eu_west_1_ecr_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,7 +54,6 @@ jobs:
           echo "us_west_2_ecr_url=$(terraform output -raw us_west_2_ecr_url)" >> $GITHUB_OUTPUT
           echo "us_east_1_ecr_url=$(terraform output -raw us_east_1_ecr_url)" >> $GITHUB_OUTPUT
           echo "eu_west_1_ecr_url=$(terraform output -raw eu_west_1_ecr_url)" >> $GITHUB_OUTPUT
-
 
   build-push:
     runs-on: ubuntu-latest
@@ -100,6 +100,28 @@ jobs:
         run: |
           sed -i "s/__VERSION__/${IMAGE_TAG:0:7}/" app/index.html
           docker build --build-arg REGION=us-east-1 \
+            -t $ECR_URL:$IMAGE_TAG ./app
+          docker tag $ECR_URL:$IMAGE_TAG $ECR_URL:prod-latest
+          docker push $ECR_URL:$IMAGE_TAG
+          docker push $ECR_URL:prod-latest
+
+      - name: Configure AWS credentials (eu-west-1)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_TERTIARY }}
+
+      - name: Login to ECR (eu-west-1)
+        id: login-ecr-eu
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push to eu-west-1
+        env:
+          ECR_URL: ${{ needs.terraform-deploy.outputs.eu_west_1_ecr_url }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          sed -i "s/__VERSION__/${IMAGE_TAG:0:7}/" app/index.html
+          docker build --build-arg REGION=eu-west-1 \
             -t $ECR_URL:$IMAGE_TAG ./app
           docker tag $ECR_URL:$IMAGE_TAG $ECR_URL:prod-latest
           docker push $ECR_URL:$IMAGE_TAG
@@ -171,7 +193,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: eu-west-1
+          aws-region: ${{ env.AWS_REGION_TERTIARY }}
 
       - name: Setup kubectl
         run: |
@@ -241,10 +263,30 @@ jobs:
           echo "PASS: us-east-1 responding"
           curl -s "http://$LB_URL"
 
+      - name: Test eu-west-1
+        run: |
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-eu-west-1 --region eu-west-1
+          LB_URL=$(kubectl get svc apache-hello-svc -n apache-app \
+            -o go-template='{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}')
+
+          MAX_RETRIES=30
+          RETRY=0
+          until curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$LB_URL" | grep -q "200"; do
+            RETRY=$((RETRY+1))
+            if [ $RETRY -ge $MAX_RETRIES ]; then
+              echo "FAIL: eu-west-1 LB not responding"
+              exit 1
+            fi
+            echo "Waiting for eu-west-1 LB... (attempt $RETRY/$MAX_RETRIES)"
+            sleep 10
+          done
+          echo "PASS: eu-west-1 responding"
+          curl -s "http://$LB_URL"
+
       - name: Summary
         run: |
           echo "=== Multi-Region Deployment Complete ==="
-          echo "Both regions healthy and serving traffic"
+          echo "All 3 regions healthy and serving traffic"
 
   setup-global-accelerator:
     runs-on: ubuntu-latest
@@ -275,6 +317,13 @@ jobs:
             --query "LoadBalancers[?DNSName=='$EAST_LB_HOST'].LoadBalancerArn" --output text)
           echo "east_nlb_arn=$EAST_NLB_ARN" >> $GITHUB_OUTPUT
 
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-eu-west-1 --region eu-west-1
+          EU_LB_HOST=$(kubectl get svc apache-hello-svc -n apache-app \
+            -o go-template='{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}')
+          EU_NLB_ARN=$(aws elbv2 describe-load-balancers --region eu-west-1 \
+            --query "LoadBalancers[?DNSName=='$EU_LB_HOST'].LoadBalancerArn" --output text)
+          echo "eu_nlb_arn=$EU_NLB_ARN" >> $GITHUB_OUTPUT
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -284,12 +333,13 @@ jobs:
         env:
           WEST_NLB_ARN: ${{ steps.get-nlbs.outputs.west_nlb_arn }}
           EAST_NLB_ARN: ${{ steps.get-nlbs.outputs.east_nlb_arn }}
+          EU_NLB_ARN: ${{ steps.get-nlbs.outputs.eu_nlb_arn }}
         run: |
           cd terraform
           terraform init
           terraform apply -auto-approve \
             -var-file=environments/prod.tfvars \
-            -var='nlb_arns={"us-west-2":"'"$WEST_NLB_ARN"'","us-east-1":"'"$EAST_NLB_ARN"'"}'
+            -var='nlb_arns={"us-west-2":"'"$WEST_NLB_ARN"'","us-east-1":"'"$EAST_NLB_ARN"'","eu-west-1":"'"$EU_NLB_ARN"'"}'
 
       - name: Show Global Accelerator endpoint
         run: |
