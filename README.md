@@ -3,7 +3,7 @@
 
 A production-grade, multi-region Kubernetes deployment with automated CI/CD, Global Accelerator for anycast routing, and a modular Terraform architecture designed for easy region expansion. Built entirely with Infrastructure as Code — zero manual steps after initial setup.
 
-## �� Architecture
+##  Architecture
 
 ```
                          ┌──────────────────────────────┐
@@ -22,7 +22,7 @@ A production-grade, multi-region Kubernetes deployment with automated CI/CD, Glo
 
 **Users hit a single Global Accelerator endpoint → traffic routes to the nearest healthy region → NLB → EKS pods**
 
-## ��️ Tech Stack
+##  Tech Stack
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
@@ -36,7 +36,7 @@ A production-grade, multi-region Kubernetes deployment with automated CI/CD, Glo
 | **Security** | OIDC Federation, Trivy | Keyless auth, vulnerability scanning |
 | **State** | S3 + Native Locking | Terraform state management |
 
-## ��️ Infrastructure Design
+##  Infrastructure Design
 
 ### Modular Architecture
 
@@ -67,7 +67,7 @@ Each region gets:
 - **Global Accelerator**: 2 static anycast IPs, health-based routing across all regions
 - **Automatic Failover**: If a region goes unhealthy, traffic shifts in seconds
 
-## �� CI Pipeline
+##  CI Pipeline
 
 Triggered on: **Pull Requests** and **pushes to `develop`**
 
@@ -81,7 +81,7 @@ validate → build-and-test → push-to-ecr (all regions)
 | **Build & Test** | Docker build, HTTP smoke tests, Trivy CVE scan |
 | **Push to ECR** | Build region-specific images, push to all regional ECRs |
 
-## �� CD Pipeline
+##  CD Pipeline
 
 Triggered on: **pushes to `main`**
 
@@ -116,7 +116,7 @@ terraform-deploy → build-push → deploy (3 regions parallel) → integration-
                                           └──────────────────────────────────┘
 ```
 
-## �� Security Highlights
+##  Security Highlights
 
 - **No AWS Access Keys** — GitHub OIDC federation provides short-lived credentials
 - **Scoped IAM Role** — Only this specific repo can assume the deployment role
@@ -126,7 +126,7 @@ terraform-deploy → build-push → deploy (3 regions parallel) → integration-
 - **EKS Access Entries** — Fine-grained cluster access control (no aws-auth ConfigMap)
 - **Concurrency Control** — Pipeline runs are serialized to prevent state conflicts
 
-## �� Project Structure
+##  Project Structure
 
 ```
 ├── app/
@@ -159,7 +159,7 @@ terraform-deploy → build-push → deploy (3 regions parallel) → integration-
 └── .gitignore
 ```
 
-## �� Quick Start
+##  Quick Start
 
 ### Prerequisites
 
@@ -244,7 +244,7 @@ module "region_ap_southeast_1" {
 
 Push to `main` and the pipeline handles everything automatically.
 
-## �� Deployment Strategy
+##  Deployment Strategy
 
 - **Rolling Updates**: New pods created before old ones terminate (maxSurge: 1, maxUnavailable: 0)
 - **Health Checks**: Liveness and readiness probes on every pod
@@ -252,7 +252,7 @@ Push to `main` and the pipeline handles everything automatically.
 - **Automatic Failover**: Global Accelerator routes around unhealthy regions in <10 seconds
 - **Concurrency Lock**: Only one CD pipeline runs at a time (prevents state conflicts)
 
-## �� Testing Strategy
+##  Testing Strategy
 
 | Level | Tool | What It Tests |
 |-------|------|---------------|
@@ -262,7 +262,7 @@ Push to `main` and the pipeline handles everything automatically.
 | **Integration** | curl + kubectl | Live NLB endpoint per region (HTTP 200) |
 | **Global** | Global Accelerator health checks | Cross-region failover |
 
-## �� Key Design Decisions
+##  Key Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
@@ -276,7 +276,7 @@ Push to `main` and the pipeline handles everything automatically.
 | Concurrency control | Prevents Terraform state lock conflicts |
 | Region-tagged images | Each region's container knows where it's running |
 
-## �� Global Accelerator Benefits
+##  Global Accelerator Benefits
 
 | Feature | Benefit |
 |---------|---------|
@@ -286,7 +286,7 @@ Push to `main` and the pipeline handles everything automatically.
 | **No DNS propagation** | Failover in seconds, not minutes (unlike Route 53) |
 | **DDoS protection** | Built-in AWS Shield Standard |
 
-## �� Future Enhancements
+##  Future Enhancements
 
 - [ ] Add Prometheus/Grafana monitoring per region
 - [ ] Implement weighted routing for canary deployments
