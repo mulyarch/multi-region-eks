@@ -1,5 +1,5 @@
 
-# �� Multi-Region EKS with Global Accelerator — CI/CD Pipeline
+# Multi-Region EKS with Global Accelerator — CI/CD Pipeline
 
 A production-grade, multi-region Kubernetes deployment with automated CI/CD, Global Accelerator for anycast routing, and a modular Terraform architecture designed for easy region expansion. Built entirely with Infrastructure as Code — zero manual steps after initial setup.
 
