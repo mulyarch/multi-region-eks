@@ -43,3 +43,23 @@ module "region_us_east_1" {
     aws = aws.us_east_1
   }
 }
+
+module "region_eu_west_1" {
+  source = "./modules/region-stack"
+
+  project_name            = var.project_name
+  region                  = "eu-west-1"
+  azs                     = ["eu-west-1a", "eu-west-1b", "eu-west-1c"]
+  vpc_cidr                = "[IP_ADDRESS]"
+  cluster_version         = "1.32"
+  node_instance_type      = "t3.medium"
+  node_desired_size       = 2
+  node_min_size           = 1
+  node_max_size           = 3
+  github_actions_role_arn = aws_iam_role.github_actions.arn
+
+  providers = {
+    aws = aws.eu_west_1
+  }
+}
+
