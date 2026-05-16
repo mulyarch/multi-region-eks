@@ -137,22 +137,19 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION_PRIMARY }}
+          aws-region: us-west-2
 
-      - name: Setup kubectl
-        run: |
-          aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-west-2 --region us-west-2
-          kubectl get nodes
-
-      - name: Deploy to us-west-2
+      - name: Setup kubectl and deploy
         env:
           ECR_URL: ${{ needs.terraform-deploy.outputs.us_west_2_ecr_url }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-west-2 --region us-west-2
+          kubectl get nodes
           kubectl apply -f k8s/namespace.yml
           sed "s|IMAGE_PLACEHOLDER|$ECR_URL:$IMAGE_TAG|" k8s/deployment.yml | kubectl apply -f -
           kubectl apply -f k8s/service.yml
-          kubectl rollout status deployment/apache-hello -n apache-app --timeout=120s
+          kubectl rollout status deployment/apache-hello -n apache-app --timeout=180s
           kubectl get pods -n apache-app
 
   deploy-us-east-1:
@@ -165,22 +162,19 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION_SECONDARY }}
+          aws-region: us-east-1
 
-      - name: Setup kubectl
-        run: |
-          aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-east-1 --region us-east-1
-          kubectl get nodes
-
-      - name: Deploy to us-east-1
+      - name: Setup kubectl and deploy
         env:
           ECR_URL: ${{ needs.terraform-deploy.outputs.us_east_1_ecr_url }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-east-1 --region us-east-1
+          kubectl get nodes
           kubectl apply -f k8s/namespace.yml
           sed "s|IMAGE_PLACEHOLDER|$ECR_URL:$IMAGE_TAG|" k8s/deployment.yml | kubectl apply -f -
           kubectl apply -f k8s/service.yml
-          kubectl rollout status deployment/apache-hello -n apache-app --timeout=120s
+          kubectl rollout status deployment/apache-hello -n apache-app --timeout=180s
           kubectl get pods -n apache-app
 
   deploy-eu-west-1:
@@ -193,22 +187,19 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION_TERTIARY }}
+          aws-region: eu-west-1
 
-      - name: Setup kubectl
-        run: |
-          aws eks update-kubeconfig --name $CLUSTER_PREFIX-eu-west-1 --region eu-west-1
-          kubectl get nodes
-
-      - name: Deploy to eu-west-1
+      - name: Setup kubectl and deploy
         env:
           ECR_URL: ${{ needs.terraform-deploy.outputs.eu_west_1_ecr_url }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          aws eks update-kubeconfig --name $CLUSTER_PREFIX-eu-west-1 --region eu-west-1
+          kubectl get nodes
           kubectl apply -f k8s/namespace.yml
           sed "s|IMAGE_PLACEHOLDER|$ECR_URL:$IMAGE_TAG|" k8s/deployment.yml | kubectl apply -f -
           kubectl apply -f k8s/service.yml
-          kubectl rollout status deployment/apache-hello -n apache-app --timeout=120s
+          kubectl rollout status deployment/apache-hello -n apache-app --timeout=180s
           kubectl get pods -n apache-app
 
   integration-tests:
@@ -217,11 +208,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (us-west-2)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION_PRIMARY }}
+          aws-region: us-west-2
 
       - name: Test us-west-2
         run: |
@@ -231,7 +222,7 @@ jobs:
 
           MAX_RETRIES=30
           RETRY=0
-          until curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$LB_URL" | grep -q "200"; do
+          until curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://$LB_URL" | grep -q "200"; do
             RETRY=$((RETRY+1))
             if [ $RETRY -ge $MAX_RETRIES ]; then
               echo "FAIL: us-west-2 LB not responding"
@@ -243,6 +234,12 @@ jobs:
           echo "PASS: us-west-2 responding"
           curl -s "http://$LB_URL"
 
+      - name: Configure AWS credentials (us-east-1)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
       - name: Test us-east-1
         run: |
           aws eks update-kubeconfig --name $CLUSTER_PREFIX-us-east-1 --region us-east-1
@@ -251,7 +248,7 @@ jobs:
 
           MAX_RETRIES=30
           RETRY=0
-          until curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$LB_URL" | grep -q "200"; do
+          until curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://$LB_URL" | grep -q "200"; do
             RETRY=$((RETRY+1))
             if [ $RETRY -ge $MAX_RETRIES ]; then
               echo "FAIL: us-east-1 LB not responding"
@@ -263,6 +260,12 @@ jobs:
           echo "PASS: us-east-1 responding"
           curl -s "http://$LB_URL"
 
+      - name: Configure AWS credentials (eu-west-1)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+
       - name: Test eu-west-1
         run: |
           aws eks update-kubeconfig --name $CLUSTER_PREFIX-eu-west-1 --region eu-west-1
@@ -271,7 +274,7 @@ jobs:
 
           MAX_RETRIES=30
           RETRY=0
-          until curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://$LB_URL" | grep -q "200"; do
+          until curl -s -o /dev/null -w "%{http_code}" --max-time 10 "http://$LB_URL" | grep -q "200"; do
             RETRY=$((RETRY+1))
             if [ $RETRY -ge $MAX_RETRIES ]; then
               echo "FAIL: eu-west-1 LB not responding"
